@@ -1,92 +1,130 @@
 # MediStock — Smart HAS
 
-**Back-end de gestão de estoque hospitalar com persistência Oracle e integração PL/SQL.**
+**Back-end de gestão de estoque hospitalar com Oracle, autenticação JWT e regras de negócio em PL/SQL.**
 
-O MediStock organiza hospitais, insumos, históricos de consumo, entregas e transferências. Esta entrega estende a aplicação Java com um modelo relacional Oracle, uma carga de dados simulados e uma procedure para registrar consumo a partir da API.
+O MediStock organiza hospitais, insumos, históricos de consumo, entregas e transferências. A integração Oracle acrescenta um modelo relacional com integridade referencial e permite registrar o consumo pela API Java. A consolidação PL/SQL reúne rotinas em um package, audita alterações do histórico por trigger e oferece uma consulta dinâmica de estoque.
 
-**Ambiente da demonstração:** Windows, Java 25, Spring Boot, Oracle Database Free e SQL Developer. As evidências foram capturadas em **26/09/2026** em ambiente local, com dados de demonstração.
+Este README documenta a estrutura do banco, a configuração do projeto, os objetos PL/SQL, a execução local e os testes. Os **12 anexos** registram a integração inicial realizada em **26/09/2026**; os testes da consolidação estão identificados separadamente para reprodução e complementação das evidências.
 
-[Como executar](#execucao) · [Modelo de dados](#modelo) · [PL/SQL](#plsql) · [Testes](#testes) · [12 evidências](#evidencias)
+[Objetivos](#objetivos) · [Arquitetura](#arquitetura) · [DER e tabelas](#modelo) · [Execução](#execucao) · [Package](#package) · [Auditoria](#auditoria) · [SQL dinâmico](#dinamico) · [Testes](#testes) · [Evidências](#evidencias)
 
-<a id="objetivo"></a>
-## Objetivo da atividade
+<a id="objetivos"></a>
+## 1. Objetivos e requisitos atendidos pela implementação
 
-Integrar o banco Oracle ao sistema Smart HAS, representado neste projeto pelo MediStock, conectando os conceitos de modelagem relacional e PL/SQL ao back-end.
+| Requisito | Implementação | Material de apoio |
+|---|---|---|
+| Adaptar o modelo lógico e físico ao Oracle | Seis tabelas do domínio, acrescidas da tabela de auditoria. | [DER](docs/DER_MediStock.png) e [dicionário de dados](docs/MODELO_E_DICIONARIO.md). |
+| Implantar as tabelas | Schema `MEDISTOCK` no serviço `FREEPDB1`, com PKs, FKs, constraints e índices. | [Scripts Oracle](database/oracle). |
+| Importar dados simulados | Hospitais, itens, históricos de consumo, entregas e transferências. | [02_dados_simulados.sql](database/oracle/02_dados_simulados.sql). |
+| Conectar PL/SQL ao back-end | Registro de consumo com chamada JDBC à procedure Oracle. | [Procedure adaptadora](database/oracle/09_adaptar_procedure.sql). |
+| Agrupar procedures e functions em packages | `PKG_MEDISTOCK`, com duas procedures públicas, uma function e duas validações privadas. | [08_criar_package.sql](database/oracle/08_criar_package.sql). |
+| Criar uma trigger de auditoria | Auditoria de `INSERT`, `UPDATE` e `DELETE` em `HISTORICO_CONSUMO`. | [07_criar_auditoria.sql](database/oracle/07_criar_auditoria.sql) e [10_criar_trigger.sql](database/oracle/10_criar_trigger.sql). |
+| Demonstrar Dynamic SQL | Filtros e ordenação de estoque construídos conforme os parâmetros da chamada. | [13_demo_sql_dinamico.sql](database/oracle/13_demo_sql_dinamico.sql). |
+| Documentar finalidade e valor dos objetos | Catálogo, parâmetros, regras, erros, transações e testes. | [Documentação PL/SQL](docs/PLSQL_OBJETOS.md). |
 
-| Requisito | Implementação e material de apoio |
-| --- | --- |
-| Criar ou adaptar o modelo lógico e físico | Seis entidades, chaves primárias, chaves estrangeiras, restrições e índices. [DER](docs/DER_MediStock.png) e [dicionário de dados](docs/MODELO_E_DICIONARIO.md). |
-| Implantar as tabelas no Oracle | Schema `MEDISTOCK` no serviço `FREEPDB1`; scripts em [database/oracle](database/oracle). |
-| Importar dados simulados relevantes ao domínio | Carga de hospitais, itens de estoque, históricos, entregas e transferências. |
-| Documentar a estrutura do banco | DER em PNG, SVG e Mermaid, dicionário completo das colunas e instruções de execução. |
-| Conectar PL/SQL ao back-end | Fluxo de registro de consumo integrado à procedure `PR_REGISTRAR_CONSUMO`. |
+O domínio adotado para os dados simulados é a logística hospitalar. A carga representa estoques e históricos relevantes ao Smart HAS; não inclui sensores ou leituras de equipamentos.
 
-## Tecnologias e organização
+## 2. Tecnologias
 
-| Componente | Uso |
-| --- | --- |
-| Java 25 | Linguagem e JDK usados pelo projeto. |
-| Spring Boot 4.1.1 | Inicialização e configuração da API. |
+| Componente | Aplicação no projeto |
+|---|---|
+| Java 25 | JDK requerido pela configuração do projeto. |
+| Spring Boot 4.1.1 | Inicialização e configuração do back-end. |
 | Spring Web | Endpoints REST. |
-| Spring Data JPA / Hibernate | Entidades, consultas e persistência JPA. |
+| Spring Data JPA / Hibernate | Mapeamento das entidades e acesso por repositórios. |
 | Spring JDBC / `JdbcTemplate` | Chamada parametrizada à procedure Oracle. |
-| Spring Security / JWT | Autenticação e proteção dos endpoints. |
-| Oracle Database Free 26ai | Banco relacional da demonstração. |
-| Oracle JDBC `ojdbc17` 23.26.2.0.0 | Driver de conexão com o Oracle. |
-| SQL Developer | Execução dos scripts e inspeção dos resultados. |
-| Springdoc 3.1.1 / Swagger UI | Documentação e testes manuais da API. |
-| Maven Wrapper | Build reproduzível pelo comando `mvnw.cmd`. |
-| Antigravity | Apoio às alterações Java, revisão dos arquivos e diagnóstico do build. |
+| Spring Security / JWT | Autenticação e proteção das rotas. |
+| Oracle Database Free 26ai | Persistência relacional e execução de PL/SQL. |
+| Oracle JDBC `ojdbc17` 23.26.2.0.0 | Driver utilizado na integração Oracle documentada. |
+| Springdoc 3.1.1 / Swagger UI | Documentação e testes manuais da API na integração. |
+| SQL Developer | Implantação dos objetos e inspeção dos resultados. |
+| Maven Wrapper | Build e execução no Windows por `mvnw.cmd`. |
 
-A API recebe as requisições e aplica a autenticação JWT. A camada de serviço valida as entradas e coordena a transação. No fluxo de consumo do perfil `oracle`, a persistência chama `PR_REGISTRAR_CONSUMO`, que valida as referências e insere em `HISTORICO_CONSUMO`.
+As instruções de execução usam Windows e PowerShell. O modelo físico utiliza SQL `BOOLEAN` e foi preparado para Oracle Free 26ai.
 
-Os demais cadastros e consultas continuam usando os repositórios JPA. A configuração original de SQLite pode ser usada sem o perfil `oracle`; os testes apresentados nesta entrega foram realizados no Oracle.
+<a id="arquitetura"></a>
+## 3. Arquitetura e integração Java–Oracle
 
-| Local | Conteúdo |
-| --- | --- |
-| `src/main/java/br/com/fiap/medistockbackend/` | Código da aplicação: controllers, serviços, entidades, repositórios e segurança. |
-| `src/main/resources/application.properties` | Configuração comum da aplicação. |
-| `src/main/resources/application-oracle.properties` | Conexão Oracle e validação do schema. |
-| [database/oracle](database/oracle) | Scripts de implantação, carga e testes. |
-| [docs/MODELO_E_DICIONARIO.md](docs/MODELO_E_DICIONARIO.md) | Tipos, colunas, chaves e decisões de modelagem. |
-| [docs/evidencias](docs/evidencias) | Doze capturas da execução local. |
+As requisições chegam aos controllers REST. O Spring Security processa a autenticação, os serviços aplicam as regras da aplicação e coordenam as transações, e a persistência utiliza JPA ou JDBC conforme a operação.
+
+No perfil `oracle`, o registro de consumo chama a procedure independente `PR_REGISTRAR_CONSUMO`. Após a consolidação, essa procedure delega para `PKG_MEDISTOCK.PR_REGISTRAR_CONSUMO`. O package insere em `HISTORICO_CONSUMO`; essa alteração dispara a trigger e gera um evento em `AUDITORIA_CONSUMO`.
+
+| Camada / objeto | Responsabilidade |
+|---|---|
+| API e Swagger | Receber os dados e permitir a execução das rotas documentadas. |
+| Segurança JWT | Validar o token das requisições protegidas. |
+| Serviço Java | Validar a entrada, converter a referência temporal e delimitar a transação. |
+| Gravador Oracle / JDBC | Executar a chamada da procedure com parâmetros. |
+| `PR_REGISTRAR_CONSUMO` independente | Preservar a assinatura já utilizada pelo Java. |
+| `PKG_MEDISTOCK` | Concentrar registro, totalização e consulta de estoque. |
+| Trigger de auditoria | Registrar automaticamente alterações no histórico. |
+
+A chamada Java permanece com quatro parâmetros:
+
+```java
+String chamada = "{call PR_REGISTRAR_CONSUMO(?, ?, ?, ?)}";
+```
+
+O trecho acima representa a string da chamada JDBC. A ordem é: item, hospital, data de referência e quantidade. O parâmetro `OUT` acrescentado à rotina interna do package é recebido pela adaptadora, mantendo a compatibilidade dessa chamada.
+
+Os demais cadastros e consultas continuam utilizando os repositórios JPA. A configuração original de SQLite corresponde ao perfil padrão; o fluxo e as evidências deste documento se referem ao **perfil Oracle**.
+
+### Organização dos arquivos
+
+| Caminho | Conteúdo |
+|---|---|
+| `src/main/java/br/com/fiap/medistockbackend/` | Controllers, serviços, entidades, repositórios e segurança. |
+| `src/main/resources/application.properties` | Configuração comum. |
+| `src/main/resources/application-oracle.properties` | Conexão e configuração do perfil Oracle. |
+| [database/oracle](database/oracle) | Scripts `00` a `14`, da implantação aos testes de auditoria. |
+| [docs/MODELO_E_DICIONARIO.md](docs/MODELO_E_DICIONARIO.md) | Modelo relacional e dicionário das 63 colunas. |
+| [docs/PLSQL_OBJETOS.md](docs/PLSQL_OBJETOS.md) | Documentação dos objetos da consolidação. |
+| [docs/PLSQL_EVIDENCIAS.md](docs/PLSQL_EVIDENCIAS.md) | Registro das evidências disponíveis e roteiro da etapa nova. |
+| [docs/evidencias](docs/evidencias) | Doze imagens da execução inicial. |
 | [.env.example](.env.example) | Modelo de configuração local. |
+| [COMO_APLICAR_E_COMMITAR.md](COMO_APLICAR_E_COMMITAR.md) | Orientações para incorporar esta documentação ao repositório. |
 
 <a id="modelo"></a>
-## Modelo lógico e físico
+## 4. Modelo lógico e físico
 
-![DER do MediStock com as seis tabelas e seus relacionamentos](docs/DER_MediStock.png)
+![DER do MediStock com sete tabelas e a auditoria transacional](docs/DER_MediStock.png)
 
-[Abrir em SVG](docs/DER_MediStock.svg) · [Código Mermaid](docs/DER_MediStock.mmd) · [Dicionário completo](docs/MODELO_E_DICIONARIO.md)
+[Abrir DER em SVG](docs/DER_MediStock.svg) · [Fonte Mermaid](docs/DER_MediStock.mmd) · [Dicionário completo](docs/MODELO_E_DICIONARIO.md)
 
-| Tabela | Finalidade | Relações principais |
-| --- | --- | --- |
-| `USUARIOS` | Cadastro e autenticação; armazenamento do hash da senha. | E-mail institucional único. |
-| `HOSPITAIS` | Cadastro dos hospitais da rede e suas coordenadas. | Referenciada pelo estoque e pelos registros operacionais. |
-| `ITENS_ESTOQUE` | Insumos, quantidades, validade, custo e armazenamento. | `HOSPITAL_ID` → `HOSPITAIS.ID`. |
-| `HISTORICO_CONSUMO` | Quantidades consumidas por item, hospital e referência temporal. | FKs para item e hospital. |
-| `ENTREGAS` | Entregas previstas e seus estados logísticos. | FKs para item e hospital de destino. |
-| `TRANSFERENCIAS` | Transferências entre hospitais. | FKs para item, hospital de origem e hospital de destino. |
+A estrutura consolidada contém **7 tabelas, 63 colunas e 8 chaves estrangeiras**. A auditoria acrescenta 15 colunas às 48 da estrutura inicial e não acrescenta FKs.
 
-Cada relacionamento é do tipo **1:N**: um pai pode ter vários registros associados; cada filho referencia um pai existente em cada chave estrangeira. O modelo contém **seis tabelas, 48 colunas e oito chaves estrangeiras**. `USUARIOS` é independente das demais tabelas nesta versão.
+| Tabela | Colunas | Finalidade e relacionamentos |
+|---|---:|---|
+| `USUARIOS` | 6 | Cadastro e autenticação, com e-mail único e hash BCrypt da senha. Independente das demais tabelas. |
+| `HOSPITAIS` | 7 | Hospitais, localização e coordenadas. Referenciada pelos registros de estoque e logística. |
+| `ITENS_ESTOQUE` | 11 | Insumos, saldos, mínimos, validade, custo e armazenamento. FK para hospital. |
+| `HISTORICO_CONSUMO` | 5 | Consumo por item, hospital e data de referência. FKs para item e hospital. |
+| `ENTREGAS` | 8 | Quantidades, destino, previsão e status de entrega. FKs para item e hospital de destino. |
+| `TRANSFERENCIAS` | 11 | Movimentações propostas entre hospitais. FKs para item, origem e destino. |
+| `AUDITORIA_CONSUMO` | 15 | Eventos de alteração do histórico, com valores anteriores/posteriores e dados da sessão Oracle. |
 
-Decisões físicas:
+Cada FK representa uma relação 1:N: um registro pai pode ter zero ou muitos filhos; cada filho exige o pai indicado pela sua chave estrangeira. Os vínculos de origem e destino em `TRANSFERENCIAS` são distintos.
 
-- IDs gerados pelo Oracle com `GENERATED BY DEFAULT ON NULL AS IDENTITY`.
-- `NUMBER(19,0)` para IDs, `NUMBER(10,0)` para quantidades e `NUMBER(12,2)` para custos.
-- `VARCHAR2(... CHAR)` para textos, `DATE` para datas e `TIMESTAMP(6)` para data e hora.
-- `BINARY_DOUBLE` para coordenadas e estimativas numéricas; `BOOLEAN` para indicadores.
-- Restrições de integridade, e-mail único e oito índices de suporte, além dos índices das chaves primárias e da unicidade.
-- O registro de histórico preserva o saldo de estoque. Ele representa o consumo informado para análise de demanda.
+Na auditoria, os IDs são referências históricas por valor. Não há FK de `AUDITORIA_CONSUMO` para `HISTORICO_CONSUMO`, permitindo que o log de uma exclusão confirmada permaneça registrado. A ligação tracejada no DER representa a captura pela trigger, e não uma chave estrangeira.
 
-O DDL foi preparado para **Oracle Free 26ai**, inclusive quanto ao uso do tipo SQL `BOOLEAN`.
+### Decisões físicas e regras
 
-## Dados simulados
+- IDs: `NUMBER(19,0)` com `GENERATED BY DEFAULT ON NULL AS IDENTITY`.
+- Quantidades: `NUMBER(10,0)`; custo unitário: `NUMBER(12,2)`.
+- Textos: `VARCHAR2(... CHAR)`; referências e validades: `DATE`.
+- Datas de criação: `TIMESTAMP(6)`; horário da auditoria: `TIMESTAMP(6) WITH TIME ZONE`.
+- Coordenadas e estimativas numéricas: `BINARY_DOUBLE`; indicadores: `BOOLEAN`.
+- E-mail institucional com restrição de unicidade; quantidades, custos e estados logísticos com constraints.
+- Oito índices de apoio na estrutura inicial e um índice adicional para a auditoria, além dos índices de PK e unicidade administrados pelo Oracle.
 
-A carga inicial é executada pelo script [02_dados_simulados.sql](database/oracle/02_dados_simulados.sql).
+O histórico admite vários registros para o mesmo item, hospital e mês. Registrar consumo não reduz automaticamente `QUANTIDADE_ATUAL`; a operação alimenta o histórico de demanda. O hospital de um histórico pode ser diferente do hospital atual de armazenamento do item.
+
+## 5. Dados simulados
+
+O script [02_dados_simulados.sql](database/oracle/02_dados_simulados.sql) insere a carga inicial:
 
 | Tabela | Quantidade inicial |
-| --- | ---: |
+|---|---:|
 | `HOSPITAIS` | 3 |
 | `ITENS_ESTOQUE` | 12 |
 | `HISTORICO_CONSUMO` | 72 |
@@ -94,18 +132,20 @@ A carga inicial é executada pelo script [02_dados_simulados.sql](database/oracl
 | `TRANSFERENCIAS` | 4 |
 | `USUARIOS` | 0 |
 
-São quatro itens por hospital e seis referências mensais por item. Os hospitais, endereços e operações da carga são fictícios. As datas da carga são calculadas em relação ao momento da execução.
+São quatro itens por hospital e seis referências mensais por item. As datas são calculadas em relação à execução da carga. Os hospitais e operações são fictícios e representam cenários de abastecimento hospitalar.
 
-O usuário da demonstração foi criado depois, pela API. Durante o teste de consumo, a contagem de históricos passou de **72 para 73**, conforme os anexos 10 e 11.
+O usuário dos anexos foi criado posteriormente pela API. A contagem do histórico passou de **72 para 73** na inclusão demonstrada. Esses números registram aquela execução e não são contagens fixas para um banco que já recebeu novas operações.
+
+`AUDITORIA_CONSUMO` é criada vazia na consolidação. Os logs são gerados por operações realizadas após a criação da trigger; a carga anterior não recebe auditoria retroativa.
 
 <a id="execucao"></a>
-## Como executar
+## 6. Configuração e execução local
 
-### 1. Preparar o ambiente
+### 6.1 Pré-requisitos
 
-Instale o **JDK 25**, o **Oracle Database Free 26ai** e o **SQL Developer**. Abra uma cópia do projeto que contenha as alterações da integração Oracle. No Windows, os exemplos abaixo consideram a pasta `C:\Projetos\MediStock_Back`.
+O ambiente utilizado possui JDK 25, Oracle Database Free 26ai, SQL Developer e o projeto em `C:\Projetos\MediStock_Back`.
 
-No PowerShell:
+No PowerShell, confira o Java utilizado pelo terminal e pelo Maven:
 
 ```powershell
 Set-Location C:\Projetos\MediStock_Back
@@ -114,40 +154,67 @@ javac -version
 .\mvnw.cmd -version
 ```
 
-Confira se o Java utilizado pelo Maven também é o **25**. O Maven Wrapper obtém a distribuição Maven necessária ao projeto.
+O Java informado pelo Maven precisa ser compatível com o `release 25` configurado no projeto. Um JDK 23 não compila esse alvo.
 
-### 2. Preparar o Oracle
+### 6.2 Conexões Oracle
 
-No SQL Developer, configure uma conexão administrativa:
+| Configuração | Administração | Aplicação |
+|---|---|---|
+| Usuário | `SYSTEM` | `MEDISTOCK` |
+| Senha | Definida na instalação | Definida na criação do schema |
+| Host | `localhost` | `localhost` |
+| Porta | `1521` | `1521` |
+| Tipo de identificação | Nome do serviço | Nome do serviço |
+| Serviço | `FREEPDB1` | `FREEPDB1` |
 
-| Campo | Valor |
-| --- | --- |
-| Usuário | `SYSTEM` |
-| Senha | Definida durante a instalação do Oracle |
-| Host | `localhost` |
-| Porta | `1521` |
-| Tipo de identificação | Nome do serviço |
-| Serviço | `FREEPDB1` |
-| Atribuição / role | Padrão |
+Para conferir a sessão selecionada no SQL Developer:
 
-Execute os scripts com **F5**, respeitando a conexão indicada:
+```sql
+SELECT USER AS USUARIO,
+       SYS_CONTEXT('USERENV', 'CON_NAME') AS CONTAINER
+FROM DUAL;
+```
 
-| Ordem | Script | Conexão | Objetivo |
-| --- | --- | --- | --- |
-| 0 | [00_criar_usuario.sql](database/oracle/00_criar_usuario.sql) | `SYSTEM` / `FREEPDB1` | Criar o usuário/schema `MEDISTOCK` e conceder os privilégios utilizados. |
-| 1 | [01_criar_tabelas.sql](database/oracle/01_criar_tabelas.sql) | `MEDISTOCK` / `FREEPDB1` | Criar tabelas, constraints, comentários e índices. |
-| 2 | [02_dados_simulados.sql](database/oracle/02_dados_simulados.sql) | `MEDISTOCK` / `FREEPDB1` | Inserir a carga simulada. |
-| 3 | [03_procedure_consumo.sql](database/oracle/03_procedure_consumo.sql) | `MEDISTOCK` / `FREEPDB1` | Criar ou atualizar a procedure. |
-| 4 | [04_validar_banco.sql](database/oracle/04_validar_banco.sql) | `MEDISTOCK` / `FREEPDB1` | Consultar contagens, relacionamentos e validade dos objetos. |
-| 5 | [05_testar_procedure.sql](database/oracle/05_testar_procedure.sql) | `MEDISTOCK` / `FREEPDB1` | Testar inserção, validações e rollback. |
+Abra cada arquivo com **Ctrl+O**, escolha a conexão correta na planilha e execute o arquivo inteiro com **F5**. Confira a aba **Saída do Script / Script Output**. Finalize alterações anteriores da sessão antes de instalar objetos, pois comandos DDL produzem commits implícitos.
 
-No script 00, substitua `SUBSTITUA_POR_SUA_SENHA` na cópia executada localmente. Em seguida, crie uma nova conexão usando o usuário `MEDISTOCK`, a senha escolhida e o mesmo serviço `FREEPDB1`.
+### 6.3 Instalação inicial — scripts 00 a 05
 
-Os scripts 00, 01 e 02 são de **implantação inicial**. O 00 interrompe a execução se o usuário já existir; o 01 pressupõe tabelas ainda não criadas; o 02 exige as tabelas vazias. Em um ambiente já implantado, utilize as consultas e os testes apropriados ao estado atual.
+Use esta sequência em um ambiente ainda não implantado:
 
-### 3. Configurar a aplicação
+| Script | Conexão | Finalidade |
+|---|---|---|
+| [00_criar_usuario.sql](database/oracle/00_criar_usuario.sql) | `SYSTEM` | Criar `MEDISTOCK`, quota e privilégios. |
+| [01_criar_tabelas.sql](database/oracle/01_criar_tabelas.sql) | `MEDISTOCK` | Criar as seis tabelas do domínio, restrições, comentários e índices. |
+| [02_dados_simulados.sql](database/oracle/02_dados_simulados.sql) | `MEDISTOCK` | Inserir dados de demonstração em tabelas inicialmente vazias. |
+| [03_procedure_consumo.sql](database/oracle/03_procedure_consumo.sql) | `MEDISTOCK` | Criar a implementação inicial da procedure de consumo. |
+| [04_validar_banco.sql](database/oracle/04_validar_banco.sql) | `MEDISTOCK` | Consultar estrutura e dados da etapa inicial. |
+| [05_testar_procedure.sql](database/oracle/05_testar_procedure.sql) | `MEDISTOCK` | Testar inserção, rejeições e rollback da procedure. |
 
-Copie [.env.example](.env.example) para `.env`, ao lado de `pom.xml`, e preencha os valores locais:
+No arquivo `00`, substitua o marcador de senha na cópia executada localmente. Os arquivos `00`, `01` e `02` são de criação/carga inicial; não são uma migração para reaplicar sobre um banco já populado.
+
+### 6.4 Consolidação PL/SQL — scripts 06 a 14
+
+Em um banco com a primeira etapa pronta, prossiga desta tabela. Pause a API durante a instalação e os testes de contagem.
+
+| Script | Conexão | Finalidade |
+|---|---|---|
+| [06_permissoes_trigger.sql](database/oracle/06_permissoes_trigger.sql) | `SYSTEM` | Conceder `CREATE TRIGGER` ao usuário `MEDISTOCK`. |
+| [07_criar_auditoria.sql](database/oracle/07_criar_auditoria.sql) | `MEDISTOCK` | Criar `AUDITORIA_CONSUMO`, comentários e índice. |
+| [08_criar_package.sql](database/oracle/08_criar_package.sql) | `MEDISTOCK` | Criar a especificação e o corpo de `PKG_MEDISTOCK`. |
+| [09_adaptar_procedure.sql](database/oracle/09_adaptar_procedure.sql) | `MEDISTOCK` | Fazer a procedure independente delegar ao package. |
+| [10_criar_trigger.sql](database/oracle/10_criar_trigger.sql) | `MEDISTOCK` | Criar a trigger de auditoria. |
+| [11_validar_objetos.sql](database/oracle/11_validar_objetos.sql) | `MEDISTOCK` | Conferir validade, habilitação, erros e dependências. |
+| [12_testar_consolidacao.sql](database/oracle/12_testar_consolidacao.sql) | `MEDISTOCK` | Executar as verificações de negócio, auditoria, consulta dinâmica e transação. |
+| [13_demo_sql_dinamico.sql](database/oracle/13_demo_sql_dinamico.sql) | `MEDISTOCK` | Demonstrar três consultas de estoque e a function de totalização. |
+| [14_evidencias_api.sql](database/oracle/14_evidencias_api.sql) | `MEDISTOCK` | Consultar IDs, contagens, históricos e auditoria antes/depois do POST da API. |
+
+O arquivo `07` é executado uma vez. Os arquivos `08`, `09` e `10` utilizam `CREATE OR REPLACE`. Depois da consolidação, o arquivo `09` define a versão vigente da procedure independente: executar o antigo `03` novamente substitui essa adaptação. Reexecute `09` caso seja necessário restaurar a delegação.
+
+O arquivo `04` corresponde à validação da estrutura inicial; o `11` verifica os objetos adicionados nesta etapa. O `14` apenas consulta o banco: a requisição HTTP é executada separadamente pelo Swagger.
+
+### 6.5 Configuração da aplicação
+
+Copie [.env.example](.env.example) para `.env`, na pasta de `pom.xml`, e preencha:
 
 ```properties
 ORACLE_URL=jdbc:oracle:thin:@//localhost:1521/FREEPDB1
@@ -158,7 +225,7 @@ JWT_EXPIRACAO_MINUTOS=120
 GEMINI_API_KEY=
 ```
 
-Para gerar a chave JWT, execute no PowerShell e copie o resultado para `JWT_SECRET`:
+Para uma instalação nova, gere uma chave JWT de 32 bytes no PowerShell:
 
 ```powershell
 $jwtBytes = New-Object byte[] 32
@@ -168,18 +235,18 @@ $jwtRng.GetBytes($jwtBytes)
 $jwtRng.Dispose()
 ```
 
-O arquivo `.env` é importado como `.properties`: os valores são escritos sem aspas. Uma barra invertida literal no valor precisa ser escapada como `\\`.
+Em um ambiente já configurado, mantenha a chave existente para não invalidar os tokens emitidos com ela. O arquivo `.env` é importado como `.properties`; use valores sem aspas e escape barras invertidas literais quando necessário. O arquivo de referência para versionamento é `.env.example`.
 
-Em `application.properties`, a importação e a configuração opcional da integração Gemini são:
+A configuração comum inclui:
 
 ```properties
 spring.config.import=optional:file:.env[.properties]
 medistock.gemini.api-key=${GEMINI_API_KEY:}
 ```
 
-Os testes desta entrega utilizam autenticação, hospitais e histórico de consumo, sem depender de uma chave Gemini.
+Os testes de autenticação, hospitais, consumo e PL/SQL descritos aqui não exigem uma chave Gemini.
 
-O arquivo `src/main/resources/application-oracle.properties` deve conter:
+No perfil `src/main/resources/application-oracle.properties`:
 
 ```properties
 spring.datasource.url=${ORACLE_URL:jdbc:oracle:thin:@//localhost:1521/FREEPDB1}
@@ -192,9 +259,9 @@ spring.jpa.hibernate.ddl-auto=validate
 spring.sql.init.mode=never
 ```
 
-`ddl-auto=validate` faz o Hibernate conferir a compatibilidade entre as entidades e as tabelas implantadas pelos scripts SQL.
+O Hibernate valida as tabelas mapeadas pelas entidades, enquanto os scripts SQL controlam a criação dos objetos Oracle. A tabela de auditoria é mantida pela trigger e não precisa de uma entidade JPA para funcionar.
 
-A dependência Oracle no `pom.xml` é:
+A dependência JDBC utilizada na integração é:
 
 ```xml
 <dependency>
@@ -205,69 +272,192 @@ A dependência Oracle no `pom.xml` é:
 </dependency>
 ```
 
-### 4. Compilar e iniciar
+### 6.6 Build, inicialização e reinício
 
 ```powershell
+Set-Location C:\Projetos\MediStock_Back
 .\mvnw.cmd -DskipTests package
-```
-
-Após `BUILD SUCCESS`:
-
-```powershell
 .\mvnw.cmd "-Dspring-boot.run.profiles=oracle" spring-boot:run
 ```
 
-Confirme no log que o perfil `oracle` está ativo. O comando de build acima pula a execução dos testes automatizados; as evidências desta entrega correspondem aos testes manuais da API e ao script de teste PL/SQL.
+Confirme `BUILD SUCCESS`, o perfil `oracle` ativo e a mensagem `Started MedistockbackendApplication`. O build acima pula a execução dos testes automatizados; isso não substitui as verificações SQL e os testes de API.
 
-- API: [http://localhost:8080](http://localhost:8080)
-- Swagger UI: [http://localhost:8080/docs](http://localhost:8080/docs)
-- OpenAPI: [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs)
+- Swagger UI: [http://localhost:8080/docs](http://localhost:8080/docs).
+- OpenAPI: [http://localhost:8080/v3/api-docs](http://localhost:8080/v3/api-docs).
+- Base da API: [http://localhost:8080](http://localhost:8080).
 
-<a id="plsql"></a>
-## Procedure PL/SQL
+Mantenha o terminal aberto enquanto utiliza a API. Para reiniciar, pressione **Ctrl+C** nesse terminal e execute novamente o comando `spring-boot:run`. Alterações apenas nos scripts Oracle não exigem um novo empacotamento Java.
 
-O código completo está em [03_procedure_consumo.sql](database/oracle/03_procedure_consumo.sql).
+<a id="package"></a>
+## 7. Package `PKG_MEDISTOCK`
+
+O package organiza as operações relacionadas ao consumo e à consulta do estoque. A **especificação** expõe as rotinas públicas; o **corpo** implementa as operações e contém as validações compartilhadas. Seu código está em [08_criar_package.sql](database/oracle/08_criar_package.sql).
+
+| Rotina | Visibilidade | Finalidade | Valor agregado |
+|---|---|---|---|
+| `PR_REGISTRAR_CONSUMO` | Pública | Validar referências e quantidade, inserir consumo e devolver o ID. | Centraliza o registro usado pela aplicação e por outros clientes. |
+| `FN_TOTAL_CONSUMO` | Pública | Somar o consumo por item/hospital, com datas opcionais. | Reutiliza o cálculo em consultas e relatórios. |
+| `PR_CONSULTAR_ESTOQUE` | Pública | Consultar estoque com filtros e ordenação configuráveis. | Atende diferentes consultas operacionais com a mesma interface. |
+| `PR_VALIDAR_IDS` | Privada | Validar preenchimento, valor positivo e integralidade dos IDs. | Compartilha a regra entre registro e totalização. |
+| `PR_VALIDAR_REFERENCIAS` | Privada | Conferir existência do item e hospital. | Evita duplicar consultas de validação nas rotinas de negócio. |
+
+As rotinas internas não aparecem como procedures ou functions independentes em `USER_OBJECTS`. Nesse catálogo, o package possui entradas para `PACKAGE` e `PACKAGE BODY`.
+
+### 7.1 Registro de consumo e compatibilidade
+
+Assinatura da procedure pública do package:
 
 ```sql
-PR_REGISTRAR_CONSUMO (
+PROCEDURE PR_REGISTRAR_CONSUMO (
     p_item_estoque_id       IN NUMBER,
     p_hospital_id          IN NUMBER,
     p_mes_referencia       IN DATE,
-    p_quantidade_consumida IN NUMBER
-)
+    p_quantidade_consumida IN NUMBER,
+    p_historico_id         OUT NUMBER
+);
 ```
 
-Essa é a assinatura da rotina; a criação do objeto deve ser feita pelo script completo.
+A quantidade deve ser um inteiro entre `0` e `2147483647`, compatível com o `Integer` do Java. A data é obrigatória, e item e hospital precisam existir. `INSERT ... RETURNING ID INTO` devolve o identificador criado.
 
-| Parâmetro | Significado |
-| --- | --- |
-| `p_item_estoque_id` | Item de estoque ao qual o consumo se refere. |
-| `p_hospital_id` | Hospital responsável pelo registro da demanda. |
-| `p_mes_referencia` | Data de referência do consumo. |
-| `p_quantidade_consumida` | Quantidade inteira e não negativa. |
+A procedure independente de mesmo nome mantém os quatro parâmetros originais e chama a rotina do package, recebendo o quinto parâmetro em uma variável local. Essa adaptação está em [09_adaptar_procedure.sql](database/oracle/09_adaptar_procedure.sql).
 
-A rotina utiliza condições `IF`, consultas `SELECT INTO`, `RAISE_APPLICATION_ERROR` e um `INSERT`. São conceitos de PL/SQL aplicados a uma operação do sistema.
+O serviço Java aceita a referência como `yyyy-MM` ou `yyyy-MM-dd`; no primeiro formato, converte para o primeiro dia do mês. O Oracle preserva a data recebida. Cada chamada válida acrescenta uma linha; repetir o POST pode registrar novamente o consumo.
 
-| Código Oracle | Regra validada |
-| --- | --- |
-| `-20001` | IDs devem ser inteiros positivos e estar preenchidos. |
-| `-20002` | Quantidade deve ser inteira, não negativa, preenchida e compatível com `Integer` do Java. |
-| `-20003` | Data de referência deve estar preenchida. |
-| `-20004` | O item de estoque deve existir. |
-| `-20005` | O hospital deve existir. |
+### 7.2 Function de totalização
 
-No Java, a chamada JDBC utiliza `{call PR_REGISTRAR_CONSUMO(?, ?, ?, ?)}`, preenchendo os parâmetros na ordem da assinatura. O serviço delimita a transação com `@Transactional`; a procedure deixa o controle de confirmação ou reversão para o chamador.
+```sql
+FUNCTION FN_TOTAL_CONSUMO (
+    p_item_estoque_id IN NUMBER,
+    p_hospital_id    IN NUMBER,
+    p_data_inicio    IN DATE DEFAULT NULL,
+    p_data_fim       IN DATE DEFAULT NULL
+) RETURN NUMBER;
+```
 
-O endpoint aceita `mesReferencia` como `yyyy-MM` ou `yyyy-MM-dd`. No primeiro formato, o Java converte o valor para o primeiro dia do mês. A procedure preserva a data recebida.
+Sem datas, a function considera todo o histórico do item no hospital. Um limite nulo deixa aquele lado do intervalo aberto. As datas são comparadas por dia, com limites inclusivos e sem considerar a hora. Não havendo consumo no intervalo, o retorno é `0`. Um intervalo invertido gera erro de negócio.
 
-Cada execução válida acrescenta um histórico. A operação não é idempotente: repetir o POST pode gerar outro registro. O modelo permite vários registros para a mesma combinação de item, hospital e mês.
+Exemplo — utilize IDs existentes no seu banco:
+
+```sql
+SELECT PKG_MEDISTOCK.FN_TOTAL_CONSUMO(
+    1, 1, DATE '2026-10-01', DATE '2026-10-31'
+) AS TOTAL_CONSUMIDO
+FROM DUAL;
+```
+
+### 7.3 Controle da transação
+
+O serviço Java coordena a transação com `@Transactional`. Package, procedure adaptadora e trigger não executam `COMMIT` nem `ROLLBACK`. A confirmação ou reversão pertence ao chamador.
+
+Essa decisão mantém o consumo e sua auditoria na mesma transação. Se a operação for desfeita, seus logs também serão desfeitos. Os testes SQL usam savepoint para verificar esse comportamento.
+
+<a id="auditoria"></a>
+## 8. Trigger e auditoria do histórico
+
+A trigger `TRG_AUD_HISTORICO_CONSUMO` é executada **depois de cada linha** incluída, alterada ou excluída de `HISTORICO_CONSUMO`:
+
+```sql
+AFTER INSERT OR UPDATE OR DELETE ON HISTORICO_CONSUMO
+FOR EACH ROW
+```
+
+O código identifica o evento por `INSERTING` e `UPDATING`, obtém os valores por `:OLD` e `:NEW` e grava em `AUDITORIA_CONSUMO`.
+
+| Operação | Valores anteriores | Valores posteriores |
+|---|---|---|
+| `INSERT` | Nulos. | Item, hospital, referência e quantidade inseridos. |
+| `UPDATE` | Dados antes da alteração. | Dados após a alteração. |
+| `DELETE` | Dados excluídos. | Nulos. |
+
+Além desses valores, a tabela registra `HISTORICO_ID`, `USUARIO_BANCO`, `CLIENT_IDENTIFIER`, `MODULO` e `REGISTRADO_EM`. O dicionário completo está em [PLSQL_OBJETOS.md](docs/PLSQL_OBJETOS.md) e [MODELO_E_DICIONARIO.md](docs/MODELO_E_DICIONARIO.md).
+
+O índice `IX_AUD_CONSUMO_HISTORICO`, sobre `(HISTORICO_ID, ID)`, apoia a consulta dos eventos de um histórico. A chave primária e a constraint de operação permitida também são documentadas no catálogo.
+
+**Valor agregado:** alterações feitas pela API ou por SQL direto passam a produzir uma trilha de mudanças dos dados de consumo. Isso permite analisar correções, exclusões e valores anteriores.
+
+### Comportamento e limites
+
+- A captura começa quando a trigger é instalada e habilitada; não é retroativa.
+- O evento participa da transação de origem. Uma operação revertida não deixa um log permanente.
+- Uma falha ao gravar a auditoria impede a operação que disparou a trigger.
+- `USUARIO_BANCO` identifica a conexão Oracle, normalmente `MEDISTOCK` na API; não identifica automaticamente a pessoa autenticada por JWT.
+- `CLIENT_IDENTIFIER` pode ficar nulo enquanto a aplicação não preencher esse contexto de sessão.
+- Um `UPDATE` que reatribua os mesmos valores também gera auditoria.
+
+A auditoria é transacional e pertence ao schema da aplicação. O objetivo desta implementação é rastrear alterações de negócio, sem implementar uma trilha administrativa independente do proprietário do banco.
+
+<a id="dinamico"></a>
+## 9. Consulta com Dynamic SQL
+
+`PKG_MEDISTOCK.PR_CONSULTAR_ESTOQUE` monta uma consulta conforme os filtros e a ordenação solicitados. Isso permite consultar situações diferentes do abastecimento com uma única rotina.
+
+```sql
+PROCEDURE PR_CONSULTAR_ESTOQUE (
+    p_resultado   OUT SYS_REFCURSOR,
+    p_hospital_id IN NUMBER DEFAULT NULL,
+    p_nome        IN VARCHAR2 DEFAULT NULL,
+    p_nivel       IN VARCHAR2 DEFAULT NULL,
+    p_ordenar_por IN VARCHAR2 DEFAULT 'NOME',
+    p_direcao     IN VARCHAR2 DEFAULT 'ASC'
+);
+```
+
+| Parâmetro | Uso |
+|---|---|
+| `p_resultado` | Cursor com as linhas retornadas. O chamador deve consumir e fechar o cursor. |
+| `p_hospital_id` | Hospital opcional; deve ser inteiro positivo quando informado. Um ID inexistente retorna zero linhas. |
+| `p_nome` | Trecho literal do nome, até 150 caracteres, sem diferenciar maiúsculas/minúsculas. |
+| `p_nivel` | `CRITICO`, `ATENCAO` ou `NORMAL`; nulo considera todos. |
+| `p_ordenar_por` | `ID`, `NOME`, `QUANTIDADE_ATUAL` ou `VALIDADE`. |
+| `p_direcao` | `ASC` ou `DESC`. |
+
+O cursor retorna item, nome do item, ID e nome do hospital, quantidade atual, quantidade mínima, nível calculado e validade. Nomes são pesquisados com `INSTR`; `%` e `_` não são curingas nessa rotina.
+
+O nível segue estas regras:
+
+| Nível | Condição |
+|---|---|
+| `CRITICO` | Quantidade atual menor ou igual à mínima. |
+| `ATENCAO` | Acima da mínima e até 1,5 vez a mínima. |
+| `NORMAL` | Acima de 1,5 vez a mínima. |
+
+### Construção e execução
+
+A consulta parte de um texto base em `v_sql`. Predicados são acrescentados quando há filtros, e o `ORDER BY` é montado conforme a coluna e a direção permitidas. A execução utiliza:
+
+```sql
+OPEN p_resultado FOR v_sql USING p_hospital_id, v_nome, v_nivel;
+```
+
+Os valores entram por **bind variables**, separados do texto SQL. Coluna e direção são escolhidas por `CASE` a partir de constantes permitidas. A CTE `parametros` mantém três placeholders fixos para todas as combinações de filtros.
+
+Essa é uma aplicação de SQL dinâmico nativo com `OPEN FOR`, `FETCH` e `CLOSE`. A finalidade é variar a estrutura da consulta e obter dados disponíveis no banco a cada chamada. Não há streaming nem atualização automática de uma tela.
+
+O [script 13](database/oracle/13_demo_sql_dinamico.sql) contém exemplos completos executáveis: todos os itens por nome; itens de um hospital por quantidade decrescente; e estoque crítico por validade. A demonstração da function aparece ao final. As novas consultas são demonstradas no SQL Developer; esta etapa não acrescenta endpoints HTTP para elas.
+
+## 10. Regras de erro
+
+| Código | Regra |
+|---|---|
+| `-20001` | IDs devem ser inteiros positivos e estar preenchidos quando obrigatórios. |
+| `-20002` | Quantidade deve ser inteira, não negativa, preenchida e compatível com `Integer`. |
+| `-20003` | Data de referência obrigatória para o registro. |
+| `-20004` | Item inexistente no registro ou na totalização. |
+| `-20005` | Hospital inexistente no registro ou na totalização. |
+| `-20006` | Data final anterior à inicial. |
+| `-20007` | Nível de estoque não permitido. |
+| `-20008` | Coluna de ordenação não permitida. |
+| `-20009` | Direção de ordenação não permitida. |
+| `-20010` | Filtro de nome superior a 150 caracteres. |
+
+Os scripts de implantação e teste também possuem verificações de conexão, existência dos objetos e compilação. Seus códigos estão descritos no [catálogo completo](docs/PLSQL_OBJETOS.md).
 
 <a id="testes"></a>
-## Roteiro de testes
+## 11. Testes de API e banco
 
-### Cadastro e autenticação
+### 11.1 Cadastro, login e autorização
 
-Em `POST /api/auth/registrar`, use dados de demonstração:
+Em `POST /api/auth/registrar`, informe os campos do cadastro. Exemplo de uma conta de demonstração nova:
 
 ```json
 {
@@ -278,7 +468,9 @@ Em `POST /api/auth/registrar`, use dados de demonstração:
 }
 ```
 
-Resposta esperada: **HTTP 201**, com `token`, `tipo`, `expiraEmMinutos` e `usuario`. O domínio `fiap.com.br` está na configuração de domínios institucionais permitidos. Para um usuário já cadastrado, obtenha um novo token por `POST /api/auth/login`:
+O cadastro válido retorna **HTTP 201**, com `token`, `tipo`, `expiraEmMinutos` e `usuario`. O domínio `fiap.com.br` é permitido pela configuração institucional utilizada. O exemplo acima é independente da conta que aparece nos anexos.
+
+Para um usuário já cadastrado, utilize `POST /api/auth/login`, com seu e-mail e senha:
 
 ```json
 {
@@ -287,11 +479,11 @@ Resposta esperada: **HTTP 201**, com `token`, `tipo`, `expiraEmMinutos` e `usuar
 }
 ```
 
-No Swagger, clique em **Authorize**, cole somente o token no campo `bearerAuth`, confirme em **Authorize** e feche a janela. O Swagger acrescentará o cabeçalho `Authorization: Bearer <token>` às chamadas protegidas.
+O login válido retorna **HTTP 200** e um novo token. No Swagger, abra a operação, clique em **Try it out**, preencha o corpo e clique em **Execute**. Copie somente o conteúdo de `token`, sem aspas.
 
-Execute `GET /api/hospitais`. O teste demonstrado retornou **HTTP 200** e os hospitais da carga simulada.
+No botão **Authorize**, selecione `bearerAuth`, cole apenas o token e confirme. Se houver uma autorização antiga, use **Logout** antes. O esquema HTTP Bearer acrescenta `Bearer` ao cabeçalho; não é necessário digitá-lo no campo do token.
 
-Para conferir o usuário no SQL Developer:
+Execute `GET /api/hospitais`. O resultado esperado é **HTTP 200**. Para conferir a persistência do cadastro no Oracle:
 
 ```sql
 SELECT ID, PRIMEIRO_NOME, EMAIL_INSTITUCIONAL, CRIADO_EM
@@ -299,20 +491,9 @@ FROM USUARIOS
 ORDER BY ID;
 ```
 
-### Validade e testes da procedure
+### 11.2 Testes da procedure inicial — evidência disponível
 
-Na conexão `MEDISTOCK`:
-
-```sql
-SELECT OBJECT_NAME, STATUS
-FROM USER_OBJECTS
-WHERE OBJECT_NAME = 'PR_REGISTRAR_CONSUMO'
-  AND OBJECT_TYPE = 'PROCEDURE';
-```
-
-Resultado esperado e observado: **`VALID`**.
-
-Execute [05_testar_procedure.sql](database/oracle/05_testar_procedure.sql) com **F5**. O teste demonstrado produziu:
+O [script 05](database/oracle/05_testar_procedure.sql) exercita a inserção válida, a quantidade negativa, o hospital inexistente e a reversão da transação. O anexo 8 mostra estas mensagens:
 
 ```text
 OK: chamada valida inseriu um historico.
@@ -321,207 +502,216 @@ OK: hospital inexistente rejeitado.
 OK: ROLLBACK removeu o registro de teste. Contagem original preservada.
 ```
 
-O script usa um savepoint e remove o registro de teste ao final. A identidade pode consumir números mesmo quando ocorre rollback; lacunas nos IDs não representam registros ausentes na contagem.
+O anexo 7 mostra `PR_REGISTRAR_CONSUMO` com status `VALID`. Esses registros pertencem à etapa inicial, anterior à inclusão de package e trigger.
 
-### Registro de consumo pela API
+### 11.3 Validação da consolidação — roteiro de reprodução
 
-Primeiro, consulte IDs existentes e a contagem atual:
+Execute [11_validar_objetos.sql](database/oracle/11_validar_objetos.sql) com F5. O resultado esperado inclui seis objetos válidos: tabela de auditoria, índice, package, package body, procedure adaptadora e trigger. A trigger deve estar `ENABLED`, `USER_ERRORS` não deve retornar erros e a procedure adaptadora deve depender do package.
 
-```sql
-SELECT ID AS ITEM_ESTOQUE_ID, NOME, HOSPITAL_ID
-FROM ITENS_ESTOQUE
-ORDER BY ID
-FETCH FIRST 5 ROWS ONLY;
+Depois execute [12_testar_consolidacao.sql](database/oracle/12_testar_consolidacao.sql), com a API pausada e ao menos um item cadastrado. O script usa IDs existentes e verifica:
 
-SELECT COUNT(*) AS TOTAL
-FROM HISTORICO_CONSUMO;
+- Registro pelo package e devolução do ID inserido.
+- Totalização geral e por intervalo de dias.
+- Auditoria de inclusão, alteração da quantidade de `7` para `9` e exclusão.
+- Compatibilidade da procedure de quatro parâmetros.
+- Rejeição de quantidade negativa, hospital inexistente e datas invertidas.
+- Filtros e ordenação do cursor, incluindo texto com aspas.
+- Rejeição de coluna e direção de ordenação fora da lista permitida.
+- Rollback do histórico e dos eventos criados pelo próprio teste.
+
+A mensagem final **esperada** é:
+
+```text
+SUCESSO: 14 verificacoes concluidas; dados de teste desfeitos.
 ```
 
-Em `POST /api/historico-consumo`, com o token autorizado:
+Como o teste desfaz suas alterações, ele não deixa os eventos de auditoria permanentemente gravados. Os IDs podem apresentar saltos após rollback, pois a geração de identidade não é desfeita.
+
+O [script 13](database/oracle/13_demo_sql_dinamico.sql) consulta os dados e mostra os resultados em **Saída do Script**. Se não houver itens críticos, a consulta desse nível retorna zero linhas, o que é um resultado válido.
+
+### 11.4 Registro pela API e verificação da auditoria
+
+Com a API iniciada no perfil Oracle e o token autorizado:
+
+1. Execute [14_evidencias_api.sql](database/oracle/14_evidencias_api.sql) em `MEDISTOCK / FREEPDB1`.
+2. Escolha um par de item/hospital da primeira consulta e anote `TOTAL_HISTORICOS` e `TOTAL_EVENTOS`.
+3. Faça um único POST em `/api/historico-consumo`, com os IDs encontrados.
+4. Confira **HTTP 201**; o contrato do endpoint retorna uma resposta sem corpo.
+5. Execute novamente o arquivo `14` e compare histórico e auditoria.
+
+Exemplo de requisição para a nova demonstração:
 
 ```json
 {
   "itemEstoqueId": 1,
   "hospitalId": 1,
-  "mesReferencia": "2026-09",
+  "mesReferencia": "2026-10",
   "quantidadeConsumida": 7
 }
 ```
 
-Adapte os IDs aos resultados da sua consulta. O contrato de sucesso do endpoint é **HTTP 201, sem corpo**. A implementação Oracle pode ser acompanhada pela mensagem `PR_REGISTRAR_CONSUMO executada` no log da aplicação.
+Substitua os IDs conforme seu banco. Sem outras gravações simultâneas, as duas contagens devem aumentar em uma unidade. O evento deve apresentar `OPERACAO = INSERT`, quantidade anterior nula, quantidade posterior `7` e `HISTORICO_ID` igual ao ID da nova linha de consumo.
 
-Após a requisição, repita a contagem e confira os registros mais recentes:
-
-```sql
-SELECT COUNT(*) AS TOTAL
-FROM HISTORICO_CONSUMO;
-
-SELECT
-    ID,
-    ITEM_ESTOQUE_ID,
-    HOSPITAL_ID,
-    TO_CHAR(MES_REFERENCIA, 'YYYY-MM-DD') AS MES_REFERENCIA,
-    QUANTIDADE_CONSUMIDA
-FROM HISTORICO_CONSUMO
-ORDER BY ID DESC
-FETCH FIRST 5 ROWS ONLY;
-```
-
-Nas capturas desta execução, a contagem passou de **72 para 73**. O registro conferido possui **ID 221**, item **1**, hospital **1**, referência **2026-09-01** e quantidade **7**. O ID é gerado pelo banco e pode variar entre ambientes.
-
-A rejeição de quantidade negativa está documentada no teste **direto da procedure**. A última imagem da entrega mostra a conferência do consumo válido persistido.
-
-### Resultados documentados
-
-| Verificação | Resultado observado | Anexos |
-| --- | --- | --- |
-| Cadastro pela API | HTTP 201 e emissão de JWT. | 1 e 2 |
-| Persistência do usuário | Usuário encontrado em `USUARIOS`. | 3 |
-| Autorização do Swagger | Estado `Authorized`. | 4 e 5 |
-| Consulta protegida de hospitais | HTTP 200 e dados da carga simulada. | 6 |
-| Compilação da procedure | Status `VALID`. | 7 |
-| Inserção e validações PL/SQL | Inserção válida; quantidade negativa e hospital inexistente rejeitados. | 8 |
-| Controle de transação | Rollback preservou a contagem original do teste SQL. | 8 |
-| Persistência do consumo | Histórico de 72 para 73 registros; dados da inclusão conferidos. | 9 a 12 |
+A captura do POST de consumo anexada a este README mostra a preparação da requisição inicial, não o código HTTP final nem o novo log de auditoria. Os resultados da consolidação devem ser registrados conforme [PLSQL_EVIDENCIAS.md](docs/PLSQL_EVIDENCIAS.md).
 
 <a id="evidencias"></a>
-## Evidências da execução
+## 12. Evidências da execução inicial
 
-As doze capturas abaixo foram fornecidas pelo responsável pela execução local. Os dados de cadastro foram declarados fictícios e destinados à demonstração. A sequência reúne preparação de requisições, respostas da API e consultas no Oracle; cada legenda descreve o conteúdo visível da imagem.
+Os anexos abaixo registram o fluxo de cadastro, autenticação e persistência executado em **26/09/2026**, com dados fictícios de demonstração. As imagens foram preservadas e organizadas com caminhos relativos para visualização no GitHub.
+
+| Verificação | Resultado mostrado | Anexos |
+|---|---|---|
+| Cadastro | HTTP 201 e emissão de JWT. | 1 e 2 |
+| Persistência do usuário | Cadastro encontrado em `USUARIOS`. | 3 |
+| Autorização | Swagger no estado `Authorized`. | 4 e 5 |
+| Consulta protegida | GET `/api/hospitais` com HTTP 200. | 6 |
+| Procedure inicial | `PR_REGISTRAR_CONSUMO` com status `VALID`. | 7 |
+| Regras e transação | Inserção válida, rejeições esperadas e rollback. | 8 |
+| Requisição de consumo | Item 1, hospital 1, referência 2026-09 e quantidade 7. | 9 |
+| Acréscimo no histórico | Contagem de 72 para 73 registros. | 10 e 11 |
+| Dados persistidos | ID 221, item 1, hospital 1, referência 2026-09-01 e quantidade 7. | 12 |
 
 <details>
-<summary><strong>Anexo 1 — Cadastro de usuário pelo POST da API</strong></summary>
+<summary><strong>Anexo 1 — Cadastro do usuário</strong></summary>
 
-Preenchimento do corpo da requisição em `POST /api/auth/registrar`, com os campos do usuário de demonstração.
+Preenchimento de `POST /api/auth/registrar` com os campos de nome, sobrenome, e-mail institucional e senha de demonstração.
 
-![Anexo 1: preenchimento do cadastro de usuário no Swagger](docs/evidencias/01-cadastro-usuario.png)
+![Anexo 1 — cadastro do usuário no Swagger](docs/evidencias/01-cadastro-usuario.png)
 
 </details>
 
 <details>
-<summary><strong>Anexo 2 — Resposta HTTP 201 e geração do token</strong></summary>
+<summary><strong>Anexo 2 — HTTP 201 e token JWT</strong></summary>
 
-A resposta do cadastro apresenta HTTP `201`, token JWT, tipo `Bearer`, prazo de expiração e dados do usuário cadastrado.
+A resposta do cadastro apresenta HTTP 201, token, tipo Bearer, expiração de 120 minutos e dados do usuário criado.
 
-![Anexo 2: cadastro concluído com HTTP 201 e token JWT](docs/evidencias/02-cadastro-201-token.png)
-
-</details>
-
-<details>
-<summary><strong>Anexo 3 — Usuário persistido no Oracle</strong></summary>
-
-A consulta à tabela `USUARIOS` retorna o usuário criado pela API, incluindo ID e data de criação.
-
-![Anexo 3: consulta do usuário cadastrado na tabela USUARIOS](docs/evidencias/03-usuario-no-oracle.png)
+![Anexo 2 — resposta de cadastro com HTTP 201 e token](docs/evidencias/02-cadastro-201-token.png)
 
 </details>
 
 <details>
-<summary><strong>Anexo 4 — Inserção do token na autorização do Swagger</strong></summary>
+<summary><strong>Anexo 3 — Usuário no Oracle</strong></summary>
 
-Preenchimento do campo `Value` da autorização `bearerAuth`, utilizada nas rotas protegidas.
+A consulta à tabela `USUARIOS` retorna o cadastro realizado pela API, com ID, nome, e-mail e data/hora de criação.
 
-![Anexo 4: janela de autorização bearerAuth no Swagger](docs/evidencias/04-autorizar-token.png)
-
-</details>
-
-<details>
-<summary><strong>Anexo 5 — Token autorizado</strong></summary>
-
-O Swagger apresenta o estado `Authorized`, permitindo o envio do token nas requisições protegidas.
-
-![Anexo 5: Swagger com bearerAuth no estado Authorized](docs/evidencias/05-token-autorizado.png)
+![Anexo 3 — consulta do cadastro persistido no Oracle](docs/evidencias/03-usuario-no-oracle.png)
 
 </details>
 
 <details>
-<summary><strong>Anexo 6 — GET autenticado em /api/hospitais</strong></summary>
+<summary><strong>Anexo 4 — Inserção do token no Swagger</strong></summary>
 
-A chamada inclui o cabeçalho de autorização e retorna HTTP `200` com os hospitais de demonstração.
+Janela de autorização `bearerAuth`, com o token no campo `Value`.
 
-![Anexo 6: GET de hospitais autenticado com resposta HTTP 200](docs/evidencias/06-hospitais-autenticado.png)
-
-</details>
-
-<details>
-<summary><strong>Anexo 7 — Procedure PR_REGISTRAR_CONSUMO com status VALID</strong></summary>
-
-A consulta a `USER_OBJECTS` confirma que a procedure está compilada e válida no schema conectado.
-
-![Anexo 7: PR_REGISTRAR_CONSUMO com status VALID no Oracle](docs/evidencias/07-procedure-valid.png)
+![Anexo 4 — preenchimento da autorização Bearer](docs/evidencias/04-autorizar-token.png)
 
 </details>
 
 <details>
-<summary><strong>Anexo 8 — Testes PL/SQL concluídos com sucesso</strong></summary>
+<summary><strong>Anexo 5 — Autorização confirmada</strong></summary>
 
-A saída do script confirma a inserção válida, a rejeição de quantidade negativa, a rejeição de hospital inexistente e o rollback com preservação da contagem inicial.
+O estado `Authorized` confirma a configuração do token no Swagger para as próximas requisições protegidas.
 
-![Anexo 8: quatro verificações PL/SQL concluídas com mensagens OK](docs/evidencias/08-testes-plsql.png)
-
-</details>
-
-<details>
-<summary><strong>Anexo 9 — Requisição de registro de histórico de consumo</strong></summary>
-
-O corpo de `POST /api/historico-consumo` informa item `1`, hospital `1`, referência `2026-09` e quantidade `7`. A captura mostra a preparação da operação de histórico associada ao item.
-
-![Anexo 9: corpo do POST de histórico de consumo](docs/evidencias/09-post-historico-consumo.png)
+![Anexo 5 — Swagger autorizado](docs/evidencias/05-token-autorizado.png)
 
 </details>
 
 <details>
-<summary><strong>Anexo 10 — Contagem anterior: 72 históricos</strong></summary>
+<summary><strong>Anexo 6 — Consulta autenticada de hospitais</strong></summary>
 
-A consulta `COUNT(*)` em `HISTORICO_CONSUMO` retorna `72` antes da inclusão demonstrada.
+O GET `/api/hospitais` inclui o cabeçalho de autorização e retorna HTTP 200 com os hospitais da carga simulada.
 
-![Anexo 10: contagem anterior de 72 registros em HISTORICO_CONSUMO](docs/evidencias/10-historico-antes-72.png)
+![Anexo 6 — GET de hospitais com HTTP 200](docs/evidencias/06-hospitais-autenticado.png)
 
 </details>
 
 <details>
-<summary><strong>Anexo 11 — Contagem posterior: 73 históricos</strong></summary>
+<summary><strong>Anexo 7 — Procedure inicial válida</strong></summary>
 
-A mesma consulta retorna `73` após a inclusão, registrando o acréscimo de uma linha.
+A consulta a `USER_OBJECTS` mostra `PR_REGISTRAR_CONSUMO` com status `VALID`. O print documenta a procedure independente da etapa inicial.
 
-![Anexo 11: contagem posterior de 73 registros em HISTORICO_CONSUMO](docs/evidencias/11-historico-depois-73.png)
+![Anexo 7 — procedure com status VALID](docs/evidencias/07-procedure-valid.png)
+
+</details>
+
+<details>
+<summary><strong>Anexo 8 — Testes PL/SQL da primeira etapa</strong></summary>
+
+A saída do arquivo `05_testar_procedure.sql` mostra inserção válida, rejeição de quantidade negativa, rejeição de hospital inexistente e rollback com preservação da contagem original.
+
+![Anexo 8 — quatro verificações da procedure concluídas](docs/evidencias/08-testes-plsql.png)
+
+</details>
+
+<details>
+<summary><strong>Anexo 9 — Requisição de histórico de consumo</strong></summary>
+
+Corpo do POST `/api/historico-consumo` com item `1`, hospital `1`, referência `2026-09` e quantidade `7`. A imagem mostra a preparação da requisição; os anexos seguintes mostram as consultas ao histórico.
+
+![Anexo 9 — requisição de registro de consumo](docs/evidencias/09-post-historico-consumo.png)
+
+</details>
+
+<details>
+<summary><strong>Anexo 10 — Contagem anterior: 72 registros</strong></summary>
+
+Resultado de `SELECT COUNT(*) AS TOTAL FROM HISTORICO_CONSUMO` antes da inclusão demonstrada.
+
+![Anexo 10 — 72 históricos antes da inclusão](docs/evidencias/10-historico-antes-72.png)
+
+</details>
+
+<details>
+<summary><strong>Anexo 11 — Contagem posterior: 73 registros</strong></summary>
+
+A mesma consulta apresenta uma linha adicional no histórico após a inclusão.
+
+![Anexo 11 — 73 históricos após a inclusão](docs/evidencias/11-historico-depois-73.png)
 
 </details>
 
 <details>
 <summary><strong>Anexo 12 — Conferência do consumo persistido</strong></summary>
 
-A consulta exibe o registro de ID `221`, vinculado ao item `1` e ao hospital `1`, com referência `2026-09-01` e quantidade consumida `7`.
+O registro mais recente exibido possui ID `221`, item `1`, hospital `1`, referência `2026-09-01` e quantidade consumida `7`. Esta captura comprova os valores de um consumo válido persistido; a rejeição de quantidade negativa está no anexo 8.
 
-![Anexo 12: conferência dos dados do consumo gravado no Oracle](docs/evidencias/12-consumo-persistido.png)
+![Anexo 12 — valores do consumo persistido](docs/evidencias/12-consumo-persistido.png)
 
 </details>
 
-## Apoio do Antigravity
+## 13. Diagnóstico rápido
 
-O Antigravity foi utilizado como apoio ao desenvolvimento local: configuração do perfil Oracle, adequação das dependências, integração da chamada PL/SQL, tratamento de validações e análise dos erros de compilação e execução.
+| Situação | Verificação |
+|---|---|
+| `release version 25 not supported` | Confira `java`, `javac` e o JDK mostrado por `mvnw.cmd -version`. |
+| Dependência Oracle não resolvida | Confira a versão do driver; depois de corrigir, use `mvnw.cmd -U -DskipTests package`. |
+| Erro de serviço/SID ao conectar | Use nome de serviço `FREEPDB1`, host `localhost` e porta `1521`. |
+| `ORA-01031` na criação da trigger | Execute `06` como `SYSTEM / FREEPDB1`. |
+| `ORA-20090` | Confira o usuário e o container selecionados no SQL Developer. |
+| `ORA-20091` ao repetir `07` | A tabela de auditoria já existe; confira o objeto existente pelo script `11`. |
+| Package ou trigger `INVALID` | Consulte `USER_ERRORS` pelo script `11` e corrija o primeiro erro de compilação. |
+| `ORA-04098` ao gravar consumo | Verifique a compilação da trigger e reexecute `10` após corrigir a causa. |
+| Falha de contagem no script `12` | Confira se outra sessão ou a API estava gravando dados durante o teste. |
+| Auditoria vazia depois do script `12` | O teste desfaz os próprios dados e logs. Use o roteiro do POST e do arquivo `14` para evidência persistida. |
+| HTTP 401/403 em rota protegida | Faça login, autorize um token válido e confira o cabeçalho `Authorization`. |
+| API sem registro de auditoria | Confira perfil `oracle`, schema utilizado, trigger habilitada e se a operação ocorreu após sua instalação. |
 
-A validação foi realizada no ambiente do projeto, usando o Swagger para as requisições e o SQL Developer para conferir os objetos e os dados persistidos. As capturas acima registram os resultados dessa execução.
+## 14. Documentação complementar
 
-## Diagnóstico rápido
+- [Modelo e dicionário físico](docs/MODELO_E_DICIONARIO.md).
+- [Catálogo dos objetos PL/SQL](docs/PLSQL_OBJETOS.md).
+- [Situação das evidências e roteiro para a nova etapa](docs/PLSQL_EVIDENCIAS.md).
+- [Como aplicar os arquivos e realizar o commit](COMO_APLICAR_E_COMMITAR.md).
 
-| Sintoma | Verificação |
-| --- | --- |
-| `release version 25 not supported` | Conferir o JDK em `java -version`, `javac -version` e `.\mvnw.cmd -version`. O projeto requer Java 25. |
-| Driver Oracle não encontrado no Maven | Conferir `ojdbc17:23.26.2.0.0` e executar `.\mvnw.cmd -U -DskipTests package`. |
-| `ORA-12505` no SQL Developer | Usar nome do serviço `FREEPDB1`, host `localhost` e porta `1521`. |
-| HTTP `403` em uma rota protegida | Autorizar um token válido no Swagger e conferir o cabeçalho `Authorization`. |
-| Erro de validação do schema | Conferir a conexão `MEDISTOCK`, os scripts implantados e os tipos definidos no dicionário. |
-| Procedure ausente ou `INVALID` | Executar o script 03 na conexão correta e consultar `USER_ERRORS`. |
+## 15. Referências
 
-## Referências
-
-- [Repositório base MediStock_Back](https://github.com/luanaestanislau/MediStock_Back)
-- [Oracle — CREATE TABLE](https://docs.oracle.com/en/database/oracle/oracle-database/26/sqlrf/CREATE-TABLE.html)
-- [Oracle — tipos de dados](https://docs.oracle.com/en/database/oracle/oracle-database/26/sqlrf/Data-Types.html)
-- [Oracle — CREATE PROCEDURE](https://docs.oracle.com/en/database/oracle/oracle-database/26/lnpls/CREATE-PROCEDURE-statement.html)
-- [Oracle JDBC — primeiros passos](https://www.oracle.com/database/technologies/getting-started-using-jdbc.html)
-- [Spring — JdbcTemplate](https://docs.spring.io/spring-framework/reference/data-access/jdbc/core.html)
-- [Spring Boot — execução pelo Maven](https://docs.spring.io/spring-boot/maven-plugin/run.html)
-- [GitHub — README e imagens com caminhos relativos](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes)
-
+- [Repositório MediStock_Back](https://github.com/luanaestanislau/MediStock_Back).
+- [Oracle — PL/SQL Packages](https://docs.oracle.com/en/database/oracle/oracle-database/26/lnpls/plsql-packages.html).
+- [Oracle — Native Dynamic SQL](https://docs.oracle.com/en/database/oracle/oracle-database/26/lnpls/native-dynamic-sql.html).
+- [Oracle — CREATE TRIGGER](https://docs.oracle.com/en/database/oracle/oracle-database/26/lnpls/CREATE-TRIGGER-statement.html).
+- [Oracle — Trigger Restrictions](https://docs.oracle.com/en/database/oracle/oracle-database/26/lnpls/trigger-restrictions.html).
+- [Oracle — CREATE TABLE](https://docs.oracle.com/en/database/oracle/oracle-database/26/sqlrf/CREATE-TABLE.html).
+- [Oracle — tipos de dados](https://docs.oracle.com/en/database/oracle/oracle-database/26/sqlrf/Data-Types.html).
+- [Spring Boot — execução pelo Maven](https://docs.spring.io/spring-boot/maven-plugin/run.html).
+- [Swagger — autenticação Bearer](https://swagger.io/docs/specification/v3_0/authentication/bearer-authentication/).
+- [GitHub — README e caminhos relativos](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes).
