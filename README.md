@@ -13,7 +13,7 @@ Este README documenta a estrutura do banco, a configuração do projeto, os obje
 
 | Requisito | Implementação | Material de apoio |
 |---|---|---|
-| Adaptar o modelo lógico e físico ao Oracle | Seis tabelas do domínio, acrescidas da tabela de auditoria. | [DER](docs/DER_MediStock.png) e [dicionário de dados](docs/MODELO_E_DICIONARIO.md). |
+| Adaptar o modelo lógico e físico ao Oracle | Seis tabelas do domínio, acrescidas da tabela de auditoria nesta etapa. | [DER](docs/DER_MediStock.png), [fonte relacional](docs/DER_MediStock.mmd) e comentários dos scripts de criação. |
 | Implantar as tabelas | Schema `MEDISTOCK` no serviço `FREEPDB1`, com PKs, FKs, constraints e índices. | [Scripts Oracle](database/oracle). |
 | Importar dados simulados | Hospitais, itens, históricos de consumo, entregas e transferências. | [02_dados_simulados.sql](database/oracle/02_dados_simulados.sql). |
 | Conectar PL/SQL ao back-end | Registro de consumo com chamada JDBC à procedure Oracle. | [Procedure adaptadora](database/oracle/09_adaptar_procedure.sql). |
@@ -76,22 +76,21 @@ Os demais cadastros e consultas continuam utilizando os repositórios JPA. A con
 | `src/main/java/br/com/fiap/medistockbackend/` | Controllers, serviços, entidades, repositórios e segurança. |
 | `src/main/resources/application.properties` | Configuração comum. |
 | `src/main/resources/application-oracle.properties` | Conexão e configuração do perfil Oracle. |
-| [database/oracle](database/oracle) | Scripts `00` a `14`, da implantação aos testes de auditoria. |
-| [docs/MODELO_E_DICIONARIO.md](docs/MODELO_E_DICIONARIO.md) | Modelo relacional e dicionário das 63 colunas. |
+| [database/oracle](database/oracle) | Scripts da implantação, consolidação e módulo complementar de alertas. |
 | [docs/PLSQL_OBJETOS.md](docs/PLSQL_OBJETOS.md) | Documentação dos objetos da consolidação. |
-| [docs/PLSQL_EVIDENCIAS.md](docs/PLSQL_EVIDENCIAS.md) | Registro das evidências disponíveis e roteiro da etapa nova. |
 | [docs/evidencias](docs/evidencias) | Doze imagens da execução inicial. |
 | [.env.example](.env.example) | Modelo de configuração local. |
-| [COMO_APLICAR_E_COMMITAR.md](COMO_APLICAR_E_COMMITAR.md) | Orientações para incorporar esta documentação ao repositório. |
 
 <a id="modelo"></a>
 ## 4. Modelo lógico e físico
 
 ![DER do MediStock com sete tabelas e a auditoria transacional](docs/DER_MediStock.png)
 
-[Abrir DER em SVG](docs/DER_MediStock.svg) · [Fonte Mermaid](docs/DER_MediStock.mmd) · [Dicionário completo](docs/MODELO_E_DICIONARIO.md)
+[Fonte Mermaid](docs/DER_MediStock.mmd) · [DDL do domínio](database/oracle/01_criar_tabelas.sql) · [DDL e comentários da auditoria](database/oracle/07_criar_auditoria.sql)
 
-A estrutura consolidada contém **7 tabelas, 63 colunas e 8 chaves estrangeiras**. A auditoria acrescenta 15 colunas às 48 da estrutura inicial e não acrescenta FKs.
+O recorte desta consolidação, representado no DER, contém **7 tabelas, 63 colunas e 8 chaves estrangeiras**. A auditoria acrescenta 15 colunas às 48 da estrutura inicial e não acrescenta FKs.
+
+O repositório também contém o módulo complementar de alertas vindo da branch `main`, com a tabela `ALERTAS`, descrito na seção 16. Esse módulo acrescenta 7 colunas e 2 FKs e não está representado no DER desta etapa. Com ambos os módulos implantados, são 8 tabelas, 70 colunas e 10 FKs.
 
 | Tabela | Colunas | Finalidade e relacionamentos |
 |---|---:|---|
@@ -190,7 +189,7 @@ Use esta sequência em um ambiente ainda não implantado:
 | [04_validar_banco.sql](database/oracle/04_validar_banco.sql) | `MEDISTOCK` | Consultar estrutura e dados da etapa inicial. |
 | [05_testar_procedure.sql](database/oracle/05_testar_procedure.sql) | `MEDISTOCK` | Testar inserção, rejeições e rollback da procedure. |
 
-No arquivo `00`, substitua o marcador de senha na cópia executada localmente. Os arquivos `00`, `01` e `02` são de criação/carga inicial; não são uma migração para reaplicar sobre um banco já populado.
+No arquivo `00`, substitua a senha de exemplo do comando `CREATE USER` na cópia executada localmente e use o mesmo valor na configuração da aplicação. Os arquivos `00`, `01` e `02` são de criação/carga inicial; não são uma migração para reaplicar sobre um banco já populado.
 
 ### 6.4 Consolidação PL/SQL — scripts 06 a 14
 
@@ -211,6 +210,8 @@ Em um banco com a primeira etapa pronta, prossiga desta tabela. Pause a API dura
 O arquivo `07` é executado uma vez. Os arquivos `08`, `09` e `10` utilizam `CREATE OR REPLACE`. Depois da consolidação, o arquivo `09` define a versão vigente da procedure independente: executar o antigo `03` novamente substitui essa adaptação. Reexecute `09` caso seja necessário restaurar a delegação.
 
 O arquivo `04` corresponde à validação da estrutura inicial; o `11` verifica os objetos adicionados nesta etapa. O `14` apenas consulta o banco: a requisição HTTP é executada separadamente pelo Swagger.
+
+Os arquivos `06_parte3_plsql.sql` e `07_parte3_exemplos.sql` pertencem ao módulo complementar da seção 16. Eles coexistem com os scripts de consolidação e possuem finalidades distintas; escolha pelo nome completo. Para utilizar os recursos de alertas persistidos e os endpoints `/api/plsql` da aplicação integrada, implante também `06_parte3_plsql.sql` após as tabelas do domínio.
 
 ### 6.5 Configuração da aplicação
 
@@ -369,7 +370,7 @@ O código identifica o evento por `INSERTING` e `UPDATING`, obtém os valores po
 | `UPDATE` | Dados antes da alteração. | Dados após a alteração. |
 | `DELETE` | Dados excluídos. | Nulos. |
 
-Além desses valores, a tabela registra `HISTORICO_ID`, `USUARIO_BANCO`, `CLIENT_IDENTIFIER`, `MODULO` e `REGISTRADO_EM`. O dicionário completo está em [PLSQL_OBJETOS.md](docs/PLSQL_OBJETOS.md) e [MODELO_E_DICIONARIO.md](docs/MODELO_E_DICIONARIO.md).
+Além desses valores, a tabela registra `HISTORICO_ID`, `USUARIO_BANCO`, `CLIENT_IDENTIFIER`, `MODULO` e `REGISTRADO_EM`. O dicionário da auditoria está em [PLSQL_OBJETOS.md](docs/PLSQL_OBJETOS.md) e nos comentários de [07_criar_auditoria.sql](database/oracle/07_criar_auditoria.sql).
 
 O índice `IX_AUD_CONSUMO_HISTORICO`, sobre `(HISTORICO_ID, ID)`, apoia a consulta dos eventos de um histórico. A chave primária e a constraint de operação permitida também são documentadas no catálogo.
 
@@ -433,7 +434,7 @@ Os valores entram por **bind variables**, separados do texto SQL. Coluna e dire�
 
 Essa é uma aplicação de SQL dinâmico nativo com `OPEN FOR`, `FETCH` e `CLOSE`. A finalidade é variar a estrutura da consulta e obter dados disponíveis no banco a cada chamada. Não há streaming nem atualização automática de uma tela.
 
-O [script 13](database/oracle/13_demo_sql_dinamico.sql) contém exemplos completos executáveis: todos os itens por nome; itens de um hospital por quantidade decrescente; e estoque crítico por validade. A demonstração da function aparece ao final. As novas consultas são demonstradas no SQL Developer; esta etapa não acrescenta endpoints HTTP para elas.
+O [script 13](database/oracle/13_demo_sql_dinamico.sql) contém exemplos completos executáveis: todos os itens por nome; itens de um hospital por quantidade decrescente; e estoque crítico por validade. A demonstração da function aparece ao final. Essas rotinas do package são demonstradas no SQL Developer e não possuem endpoints próprios nesta etapa. O módulo complementar mantém seus endpoints `/api/plsql`, descritos na seção 16.
 
 ## 10. Regras de erro
 
@@ -469,6 +470,8 @@ Em `POST /api/auth/registrar`, informe os campos do cadastro. Exemplo de uma con
 ```
 
 O cadastro válido retorna **HTTP 201**, com `token`, `tipo`, `expiraEmMinutos` e `usuario`. O domínio `fiap.com.br` é permitido pela configuração institucional utilizada. O exemplo acima é independente da conta que aparece nos anexos.
+
+A configuração institucional também permite os domínios `hc.unicamp.br`, `hc.usp.br`, `einstein.br`, `hospital.gov.br` e `saude.sp.gov.br`. A senha deve ter no mínimo 8 caracteres.
 
 Para um usuário já cadastrado, utilize `POST /api/auth/login`, com seu e-mail e senha:
 
@@ -552,7 +555,7 @@ Exemplo de requisição para a nova demonstração:
 
 Substitua os IDs conforme seu banco. Sem outras gravações simultâneas, as duas contagens devem aumentar em uma unidade. O evento deve apresentar `OPERACAO = INSERT`, quantidade anterior nula, quantidade posterior `7` e `HISTORICO_ID` igual ao ID da nova linha de consumo.
 
-A captura do POST de consumo anexada a este README mostra a preparação da requisição inicial, não o código HTTP final nem o novo log de auditoria. Os resultados da consolidação devem ser registrados conforme [PLSQL_EVIDENCIAS.md](docs/PLSQL_EVIDENCIAS.md).
+A captura do POST de consumo anexada a este README mostra a preparação da requisição inicial, não o código HTTP final nem o novo log de auditoria. Para complementar a comprovação, registre a saída do script `11`, o sucesso das 14 verificações do `12`, os resultados do `13` e a comparação antes/depois do `14` junto do POST com HTTP 201. Use as contagens e os IDs observados na nova execução.
 
 <a id="evidencias"></a>
 ## 12. Evidências da execução inicial
@@ -695,13 +698,17 @@ O registro mais recente exibido possui ID `221`, item `1`, hospital `1`, referê
 | Auditoria vazia depois do script `12` | O teste desfaz os próprios dados e logs. Use o roteiro do POST e do arquivo `14` para evidência persistida. |
 | HTTP 401/403 em rota protegida | Faça login, autorize um token válido e confira o cabeçalho `Authorization`. |
 | API sem registro de auditoria | Confira perfil `oracle`, schema utilizado, trigger habilitada e se a operação ocorreu após sua instalação. |
+| `ORA-01017` | Confira a existência do usuário `MEDISTOCK` e a senha configurada no `.env`. |
+| `ORA-12541` / `ORA-12514` | Confira se o banco e o serviço `FREEPDB1` estão disponíveis. Em uma instalação por Docker, confira também o container. |
+| `missing table` ao iniciar | Confira a implantação das tabelas e o schema utilizado pela aplicação. |
+| App no celular sem conexão | Confira IP do computador, rede Wi-Fi e liberação da porta 8080 no firewall. |
 
 ## 14. Documentação complementar
 
-- [Modelo e dicionário físico](docs/MODELO_E_DICIONARIO.md).
+- [DER desta etapa](docs/DER_MediStock.png) e [fonte Mermaid](docs/DER_MediStock.mmd).
 - [Catálogo dos objetos PL/SQL](docs/PLSQL_OBJETOS.md).
-- [Situação das evidências e roteiro para a nova etapa](docs/PLSQL_EVIDENCIAS.md).
-- [Como aplicar os arquivos e realizar o commit](COMO_APLICAR_E_COMMITAR.md).
+- [Scripts Oracle](database/oracle), com tipos, restrições e comentários de tabelas e colunas.
+- [Implementação complementar de alertas](database/oracle/06_parte3_plsql.sql) e [exemplos](database/oracle/07_parte3_exemplos.sql).
 
 ## 15. Referências
 
@@ -715,3 +722,89 @@ O registro mais recente exibido possui ID `221`, item `1`, hospital `1`, referê
 - [Spring Boot — execução pelo Maven](https://docs.spring.io/spring-boot/maven-plugin/run.html).
 - [Swagger — autenticação Bearer](https://swagger.io/docs/specification/v3_0/authentication/bearer-authentication/).
 - [GitHub — README e caminhos relativos](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes).
+
+## 16. Recursos complementares do repositório integrado
+
+As orientações abaixo preservam os recursos de execução e API existentes na branch `main`, além da consolidação descrita nas seções anteriores. As evidências de setembro documentam a integração inicial; não comprovam os testes desses recursos complementares.
+
+### 16.1 Execução com SQLite
+
+Com o `.env` configurado e sem selecionar o perfil Oracle, o modo padrão utiliza `medistock.db` e cria as tabelas mapeadas pelo Hibernate:
+
+```powershell
+.\mvnw.cmd spring-boot:run
+```
+
+Se `SPRING_PROFILES_ACTIVE` estiver definido como `oracle`, ajuste a seleção de perfil para o modo desejado. As procedures, a trigger e os testes Oracle deste README exigem o perfil `oracle` e o banco Oracle. A chave JWT é necessária para a autenticação nos dois modos.
+
+### 16.2 Oracle por Docker
+
+O repositório também oferece a alternativa de executar Oracle em um container, para ambientes sem instalação local. O exemplo abaixo usa sintaxe PowerShell, com um volume persistente e a porta 1521:
+
+```powershell
+docker run -d --name oracle-medistock -p 1521:1521 -e ORACLE_PASSWORD=SUA_SENHA_ADMIN -v oracle-medistock-data:/opt/oracle/oradata gvenzl/oracle-free:slim-faststart
+docker logs oracle-medistock
+```
+
+Substitua `SUA_SENHA_ADMIN` pela senha escolhida antes da execução e aguarde a mensagem `DATABASE IS READY TO USE!`. Em um computador que já tenha Oracle usando a porta 1521, escolha apenas uma instalação para essa porta ou ajuste o mapeamento e a conexão. A senha administrativa é distinta da senha definida para o schema `MEDISTOCK`.
+
+Crie o usuário e execute os scripts pelo SQL Developer seguindo as conexões e sequências da seção 6. Também é possível copiar os scripts para o container com `docker cp database/oracle oracle-medistock:/tmp/oracle` e executá-los pelo SQL*Plus, usando as mesmas conexões e a ordem documentada. Nas próximas inicializações do container existente, use:
+
+```powershell
+docker start oracle-medistock
+.\mvnw.cmd "-Dspring-boot.run.profiles=oracle" spring-boot:run
+```
+
+Em Bash, use `./mvnw` no lugar de `.\mvnw.cmd`. Uma alternativa para gerar a chave JWT em ambientes com OpenSSL é `openssl rand -base64 32`.
+
+### 16.3 Acesso pelo aplicativo e rotas da API
+
+O Swagger fica em `http://localhost:8080/docs` e a base dos endpoints em `http://localhost:8080/api`. No celular, use `http://IP_DO_COMPUTADOR:8080/api`, com os dispositivos na mesma rede e a porta 8080 acessível. As origens permitidas para clientes web podem ser configuradas em `CORS_ALLOWED_ORIGINS`, separadas por vírgulas.
+
+| Rota base | Finalidade |
+|---|---|
+| `/api/auth` | Cadastro e login. |
+| `/api/perfil` | Dados do usuário autenticado. |
+| `/api/hospitais` | Cadastro, consulta e manutenção de hospitais. |
+| `/api/estoque` | Itens e resumo do estoque. |
+| `/api/alertas` | Alertas de estoque e validade. |
+| `/api/historico-consumo` | Registro e consulta de consumo. |
+| `/api/logistica` | Entregas, transferências e mapa. |
+| `/api/ia` | Análise interna e sugestões de redistribuição. |
+| `/api/plsql` | Alertas, indicadores e relatórios Oracle do módulo complementar. |
+
+As rotas protegidas usam JWT; os contratos completos estão no Swagger. Configure `GEMINI_API_KEY` para utilizar os recursos dependentes da integração Gemini.
+
+### 16.4 Módulo complementar de alertas e relatórios
+
+O arquivo [06_parte3_plsql.sql](database/oracle/06_parte3_plsql.sql), executado como `MEDISTOCK / FREEPDB1` após as tabelas do domínio, cria:
+
+| Objeto | Finalidade |
+|---|---|
+| `ALERTAS` | Persistir alertas associados a item e hospital. |
+| `VW_ALERTAS_VIGENTES` | Consultar os alertas atuais que continuam coerentes com o estoque e a validade. |
+| `FN_DIAS_COBERTURA_ESTOQUE` | Calcular cobertura a partir do saldo e do histórico de consumo. |
+| `FN_STATUS_ESTOQUE_FORMATADO` | Retornar uma descrição da situação do estoque. |
+| `PRC_REGISTRAR_ALERTAS_CRITICOS` | Processar e registrar alertas. |
+| `PRC_RELATORIO_CONSUMO_HOSPITAL` | Gerar relatório de consumo por hospital. |
+
+`ALERTAS` possui `ID`, `ITEM_ESTOQUE_ID`, `HOSPITAL_ID`, `TIPO`, `MENSAGEM`, `ORIGEM` e `CRIADO_EM`. O item e o hospital são FKs opcionais; a FK do item usa `ON DELETE CASCADE`. A tabela registra alertas de negócio, enquanto `AUDITORIA_CONSUMO` registra alterações do histórico.
+
+O arquivo [07_parte3_exemplos.sql](database/oracle/07_parte3_exemplos.sql) demonstra as rotinas. No perfil Oracle, a aplicação expõe:
+
+- `POST /api/plsql/alertas/processar`;
+- `GET /api/plsql/alertas`;
+- `GET /api/plsql/estoque/indicadores`;
+- `GET /api/plsql/relatorios/consumo/{hospitalId}`.
+
+Esses arquivos complementam `PKG_MEDISTOCK` e a trigger desta entrega. Seus nomes completos distinguem os scripts com prefixos numéricos iguais.
+
+### 16.5 Testes automatizados Java
+
+Para executar os testes Maven, sem a opção que os ignora:
+
+```powershell
+.\mvnw.cmd test
+```
+
+Os testes que dependem de Oracle real exigem a configuração do banco correspondente. A conciliação da documentação e dos conflitos Git não equivale à execução dessa suíte ou dos testes SQL no ambiente local.
