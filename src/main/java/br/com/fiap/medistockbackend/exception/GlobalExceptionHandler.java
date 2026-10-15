@@ -1,6 +1,7 @@
 package br.com.fiap.medistockbackend.exception;
 
 import jakarta.validation.ConstraintViolationException;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -12,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -46,6 +48,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGenerico(Exception ex) {
+        log.error("Erro interno nao tratado: {}", ex.getMessage(), ex);
         return construirResposta(HttpStatus.INTERNAL_SERVER_ERROR, "Erro interno inesperado", null);
     }
 
